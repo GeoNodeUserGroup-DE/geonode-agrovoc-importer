@@ -27,7 +27,12 @@ from rdflib import Graph, Literal
 from rdflib.namespace import RDF, RDFS, SKOS, DC, DCTERMS
 from rdflib.util import guess_format
 
-from geonode.base.models import Thesaurus, ThesaurusKeyword, ThesaurusKeywordLabel, ThesaurusLabel
+from geonode.base.models import (
+    Thesaurus,
+    ThesaurusKeyword,
+    ThesaurusKeywordLabel,
+    ThesaurusLabel,
+)
 
 
 class Command(BaseCommand):
@@ -44,9 +49,15 @@ class Command(BaseCommand):
             help="Only parse and print the thesaurus file, without perform insertion in the DB.",
         )
 
-        parser.add_argument("--name", dest="name", help="Identifier name for the thesaurus in this GeoNode instance.")
+        parser.add_argument(
+            "--name",
+            dest="name",
+            help="Identifier name for the thesaurus in this GeoNode instance.",
+        )
 
-        parser.add_argument("--file", dest="file", help="Full path to a thesaurus in RDF format.")
+        parser.add_argument(
+            "--file", dest="file", help="Full path to a thesaurus in RDF format."
+        )
 
     def handle(self, **options):
         input_file = options.get("file")
@@ -72,7 +83,9 @@ class Command(BaseCommand):
         # name, which should include the extension, to guess_format manually...
         rdf_format = None
         if isinstance(input_file, UploadedFile):
-            self.stderr.write(self.style.WARNING(f"Guessing RDF format from {input_file.name}..."))
+            self.stderr.write(
+                self.style.WARNING(f"Guessing RDF format from {input_file.name}...")
+            )
             rdf_format = guess_format(input_file.name)
         g.parse(input_file, format=rdf_format)
 
@@ -89,7 +102,9 @@ class Command(BaseCommand):
         date_issued = g.value(scheme, DCTERMS.issued, None, default="2024-01-01")
 
         self.stderr.write(
-            self.style.SUCCESS(f'Thesaurus "{thesaurus_title}", desc: {description} issued at {date_issued}')
+            self.style.SUCCESS(
+                f'Thesaurus "{thesaurus_title}", desc: {description} issued at {date_issued}'
+            )
         )
 
         thesaurus = Thesaurus()
@@ -116,34 +131,43 @@ class Command(BaseCommand):
             pref = preferredLabel(g, concept, default_lang)[0][1]
             about = str(concept)
             alt_label = g.value(concept, SKOS.altLabel, object=None, default=None)
+
             if alt_label is not None:
                 alt_label = str(alt_label)
             else:
-                available_labels = [t for t in g.objects(concept, SKOS.prefLabel) if isinstance(t, Literal)]
+                available_labels = [
+                    t
+                    for t in g.objects(concept, SKOS.prefLabel)
+                    if isinstance(t, Literal)
+                ]
                 alt_label = value_for_language(available_labels, default_lang)
 
-            self.stderr.write(self.style.SUCCESS(f"Concept {str(pref)}: {alt_label} ({about})"))
+            self.stderr.write(
+                self.style.SUCCESS(f"Concept {str(pref)}: {alt_label} ({about})")
+            )
 
             tk = ThesaurusKeyword()
             tk.thesaurus = thesaurus
             tk.about = about
             tk.alt_label = alt_label
-
-            if store:
-                tk.save()
-
-            for _, pref_label in preferredLabel(g, concept):
-                lang = pref_label.language
-                label = str(pref_label)
-                self.stderr.write(self.style.SUCCESS(f"    Label {lang}: {label}"))
-
-                tkl = ThesaurusKeywordLabel()
-                tkl.keyword = tk
-                tkl.lang = lang
-                tkl.label = label
-
+            try:
                 if store:
-                    tkl.save()
+                    tk.save()
+
+                for _, pref_label in preferredLabel(g, concept):
+                    lang = pref_label.language
+                    label = str(pref_label)
+                    self.stderr.write(self.style.SUCCESS(f"    Label {lang}: {label}"))
+
+                    tkl = ThesaurusKeywordLabel()
+                    tkl.keyword = tk
+                    tkl.lang = lang
+                    tkl.label = label
+
+                    if store:
+                        tkl.save()
+            except:
+                print(f"could not save: {alt_label}, duplicate ...")
 
     def create_fake_thesaurus(self, name):
         thesaurus = Thesaurus()
@@ -171,7 +195,10 @@ class Command(BaseCommand):
 
 
 def value_for_language(available: List[Literal], default_lang: str) -> str:
-    sorted_lang = sorted(available, key=lambda literal: "" if literal.language is None else literal.language)
+    sorted_lang = sorted(
+        available,
+        key=lambda literal: "" if literal.language is None else literal.language,
+    )
     for item in sorted_lang:
         if item.language is None:
             return str(item)
