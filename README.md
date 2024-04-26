@@ -40,3 +40,5 @@ options:
 ```bash
 python manage.py load_agrovoc_thesaurus --name AGROVOC --file agrovoc_2022-07-01_core.nt
 ```
+
+**Please notice: running this script will require a big amount of memory (~12.5GB)**
