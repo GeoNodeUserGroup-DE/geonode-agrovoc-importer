@@ -34,6 +34,9 @@ from geonode.base.models import (
     ThesaurusLabel,
 )
 
+SUPPORTED_LANGUAGES = ["fr", "de", "en", "it", "es"]
+DEFAULT_LANG = getattr(settings, "THESAURUS_DEFAULT_LANG", "en")
+
 
 class Command(BaseCommand):
     help = "Load a thesaurus in RDF format into DB"
@@ -56,6 +59,14 @@ class Command(BaseCommand):
         )
 
         parser.add_argument(
+            "--defaultlang",
+            dest="default_lang",
+            type=str,
+            default=DEFAULT_LANG,
+            help="change default language.",
+        )
+
+        parser.add_argument(
             "--file", dest="file", help="Full path to a thesaurus in RDF format."
         )
 
@@ -63,6 +74,7 @@ class Command(BaseCommand):
         input_file = options.get("file")
         name = options.get("name")
         dryrun = options.get("dryrun")
+        defaultlang = options.get("default_lang")
 
         if not input_file:
             raise CommandError("Missing thesaurus rdf file path (--file)")
@@ -70,14 +82,11 @@ class Command(BaseCommand):
         if not name:
             raise CommandError("Missing identifier name for the thesaurus (--name)")
 
-        if name.startswith("fake"):
-            self.create_fake_thesaurus(name)
-        else:
-            self.load_thesaurus(input_file, name, not dryrun)
+        self.load_thesaurus(input_file, name, defaultlang, not dryrun)
 
-    def load_thesaurus(self, input_file, name, store):
+    def load_thesaurus(self, input_file, name, defaultlang, store):
         g = Graph()
-
+        print(defaultlang)
         # if the input_file is an UploadedFile object rather than a file path the Graph.parse()
         # method may not have enough info to correctly guess the type; in this case supply the
         # name, which should include the extension, to guess_format manually...
@@ -95,9 +104,8 @@ class Command(BaseCommand):
         if scheme is None:
             raise CommandError("ConceptScheme not found in file")
 
-        default_lang = getattr(settings, "THESAURUS_DEFAULT_LANG", "en")
         available_titles = [t for t in g.objects(scheme) if isinstance(t, Literal)]
-        thesaurus_title = value_for_language(available_titles, default_lang)
+        thesaurus_title = value_for_language(available_titles, defaultlang)
         description = g.value(scheme, DC.description, None, default=thesaurus_title)
         date_issued = g.value(scheme, DCTERMS.issued, None, default="2024-01-01")
 
@@ -107,6 +115,7 @@ class Command(BaseCommand):
             )
         )
 
+        # Define Thesaurus Data
         thesaurus = Thesaurus()
         thesaurus.identifier = name
         thesaurus.description = description
@@ -117,39 +126,23 @@ class Command(BaseCommand):
         if store:
             thesaurus.save()
 
-        for lang in available_titles:
-            if lang.language is not None:
-                thesaurus_label = ThesaurusLabel()
-                thesaurus_label.lang = lang.language
-                thesaurus_label.label = lang.value
-                thesaurus_label.thesaurus = thesaurus
-
-                if store:
-                    thesaurus_label.save()
-
         for concept in g.subjects(RDF.type, SKOS.Concept):
-            pref = preferredLabel(g, concept, default_lang)[0][1]
+            try:
+                pref = preferredLabel(g, concept, defaultlang)[0][1]
+            except:
+                self.style.ERROR(
+                    f"could not find {str(concept) } in default language {defaultlang} ..."
+                )
+                continue
             about = str(concept)
-            alt_label = g.value(concept, SKOS.altLabel, object=None, default=None)
 
-            if alt_label is not None:
-                alt_label = str(alt_label)
-            else:
-                available_labels = [
-                    t
-                    for t in g.objects(concept, SKOS.prefLabel)
-                    if isinstance(t, Literal)
-                ]
-                alt_label = value_for_language(available_labels, default_lang)
+            self.stderr.write(self.style.SUCCESS(f"Concept: {str(pref)} ({about})"))
 
-            self.stderr.write(
-                self.style.SUCCESS(f"Concept {str(pref)}: {alt_label} ({about})")
-            )
-
+            # Store Keyword
             tk = ThesaurusKeyword()
             tk.thesaurus = thesaurus
             tk.about = about
-            tk.alt_label = alt_label
+            tk.alt_label = str(pref)
             try:
                 if store:
                     tk.save()
@@ -157,41 +150,20 @@ class Command(BaseCommand):
                 for _, pref_label in preferredLabel(g, concept):
                     lang = pref_label.language
                     label = str(pref_label)
-                    self.stderr.write(self.style.SUCCESS(f"    Label {lang}: {label}"))
+                    if lang in SUPPORTED_LANGUAGES:
+                        self.stderr.write(
+                            self.style.SUCCESS(f"    Label {lang}: {label}")
+                        )
 
-                    tkl = ThesaurusKeywordLabel()
-                    tkl.keyword = tk
-                    tkl.lang = lang
-                    tkl.label = label
+                        tkl = ThesaurusKeywordLabel()
+                        tkl.keyword = tk
+                        tkl.lang = lang
+                        tkl.label = label
 
-                    if store:
-                        tkl.save()
+                        if store:
+                            tkl.save()
             except:
-                print(f"could not save: {alt_label}, duplicate ...")
-
-    def create_fake_thesaurus(self, name):
-        thesaurus = Thesaurus()
-        thesaurus.identifier = name
-
-        thesaurus.title = f"Title: {name}"
-        thesaurus.description = "SAMPLE FAKE THESAURUS USED FOR TESTING"
-        thesaurus.date = "2016-10-01"
-
-        thesaurus.save()
-
-        for keyword in ["aaa", "bbb", "ccc"]:
-            tk = ThesaurusKeyword()
-            tk.thesaurus = thesaurus
-            tk.about = f"{keyword}_about"
-            tk.alt_label = f"{keyword}_alt"
-            tk.save()
-
-            for _l in ["it", "en", "es"]:
-                tkl = ThesaurusKeywordLabel()
-                tkl.keyword = tk
-                tkl.lang = _l
-                tkl.label = f"{keyword}_l_{_l}_t_{name}"
-                tkl.save()
+                print(f"could not save: {str(pref)}, duplicate ...")
 
 
 def value_for_language(available: List[Literal], default_lang: str) -> str:

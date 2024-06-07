@@ -28,67 +28,76 @@ from rdflib.util import guess_format
 from geonode.base.models import Thesaurus, ThesaurusKeyword, ThesaurusKeywordLabel
 
 
-class SKOS_XL():
-    ''' additional definitions(SKOS-XL) not included in rdflib '''
+class SKOS_XL:
+    """additional definitions(SKOS-XL) not included in rdflib"""
+
     prefLabel = URIRef("http://www.w3.org/2008/05/skos-xl#prefLabel")
-    literalForm = URIRef('http://www.w3.org/2008/05/skos-xl#literalForm')
+    literalForm = URIRef("http://www.w3.org/2008/05/skos-xl#literalForm")
 
 
 # only including concepts for the AGROVOC core concept scheme
 AGROVOC_ConceptSchemeURI = URIRef("http://aims.fao.org/aos/agrovoc")
 
 # To reduce storage this script only includes languages supported by geonode and not all languages included in the AGROVOC,
-SUPPORTED_LANGUAGES = ['fr', 'de', 'en', 'it', 'es']
+SUPPORTED_LANGUAGES = ["fr", "de", "en", "it", "es"]
+DEFAULT_LANG = getattr(settings, "THESAURUS_DEFAULT_LANG", "en")
 
 
 class Command(BaseCommand):
-
-    help = '(Down)Load a AGROVOC in RDF format into DB'
+    help = "(Down)Load a AGROVOC in RDF format into DB"
 
     def add_arguments(self, parser):
-
         # Named (optional) arguments
         parser.add_argument(
-            '-d',
-            '--dry-run',
+            "-d",
+            "--dry-run",
             action="store_true",
-            dest='dryrun',
+            dest="dryrun",
             default=False,
-            help='Only parse and print the thesaurus file, without perform insertion in the DB.')
+            help="Only parse and print the thesaurus file, without perform insertion in the DB.",
+        )
 
         parser.add_argument(
-            '--name',
-            dest='name',
-            help='Identifier name for the thesaurus in this GeoNode instance.')
+            "--name",
+            dest="name",
+            help="Identifier name for the thesaurus in this GeoNode instance.",
+        )
 
         parser.add_argument(
-            '--file',
-            dest='file',
-            help='Full path to a thesaurus in RDF format.')
+            "--file", dest="file", help="Full path to a thesaurus in RDF format."
+        )
 
         parser.add_argument(
-            '--title',
-            dest='title',
-            default='AGROVOC',
-            help="title to set in the base_thesaurus table for the agrovoc thesaurus")
+            "--title",
+            dest="title",
+            default="AGROVOC",
+            help="title to set in the base_thesaurus table for the agrovoc thesaurus",
+        )
 
         parser.add_argument(
-            '--description',
-            dest='description',
+            "--description",
+            dest="description",
             default="""
             AGROVOC is a multilingual and controlled vocabulary designed to cover concepts and terminology under FAO's areas of interest. 
             """,
-            help="description to set in the base_thesaurus table for the agrovoc thesaurus")
+            help="description to set in the base_thesaurus table for the agrovoc thesaurus",
+        )
+
+        parser.add_argument(
+            "--defaultlang",
+            dest="default_lang",
+            type=str,
+            default=DEFAULT_LANG,
+            help="change default language.",
+        )
 
     def handle(self, **options):
-
-        input_file = options.get('file')
-        name = options.get('name')
-
-        title = options.get('title')
-        description = options.get('description')
-
-        dryrun = options.get('dryrun')
+        input_file = options.get("file")
+        name = options.get("name")
+        title = options.get("title")
+        description = options.get("description")
+        dryrun = options.get("dryrun")
+        defaultlang = options.get("default_lang")
 
         if not input_file:
             raise CommandError("Missing thesaurus rdf file path (--file)")
@@ -96,14 +105,24 @@ class Command(BaseCommand):
         if not name:
             raise CommandError("Missing identifier name for the thesaurus (--name)")
 
-        self.load_thesaurus(input_file=input_file,
-                            name=name,
-                            store=not dryrun,
-                            title=title,
-                            description=description)
+        self.load_thesaurus(
+            input_file=input_file,
+            name=name,
+            store=not dryrun,
+            title=title,
+            description=description,
+            defaultlang=defaultlang,
+        )
 
-    def load_thesaurus(self, input_file: str, name: str, store: bool, title: str, description: str):
-
+    def load_thesaurus(
+        self,
+        input_file: str,
+        name: str,
+        store: bool,
+        title: str,
+        description: str,
+        defaultlang: str,
+    ):
         g = Graph()
 
         # if the input_file is an UploadedFile object rather than a file path the Graph.parse()
@@ -111,15 +130,23 @@ class Command(BaseCommand):
         # name, which should include the extension, to guess_format manually...
         rdf_format = None
         if isinstance(input_file, UploadedFile):
-            self.stderr.write(self.style.WARNING(f"Guessing RDF format from {input_file.name}..."))
+            self.stderr.write(
+                self.style.WARNING(f"Guessing RDF format from {input_file.name}...")
+            )
             rdf_format = guess_format(input_file.name)
 
-        self.stderr.write(self.style.SUCCESS(f'Starting to parsed file: {input_file} ...'))
+        self.stderr.write(
+            self.style.SUCCESS(f"Starting to parsed file: {input_file} ...")
+        )
         g.parse(input_file, format=rdf_format)
-        self.stderr.write(self.style.SUCCESS(f'Successful parsed file: {input_file} ...'))
+        self.stderr.write(
+            self.style.SUCCESS(f"Successful parsed file: {input_file} ...")
+        )
 
         # make date confirm to geonode thesaurus database model
-        thesaurus_date = Literal(g.value(AGROVOC_ConceptSchemeURI, DCTERMS.modified, None, default="")).toPython()
+        thesaurus_date = Literal(
+            g.value(AGROVOC_ConceptSchemeURI, DCTERMS.modified, None, default="")
+        ).toPython()
         thesaurus_date = thesaurus_date.replace(tzinfo=None).isoformat()
 
         # define Thesaurus metadata for AGROVOC
@@ -133,19 +160,24 @@ class Command(BaseCommand):
         if store:
             thesaurus.save()
 
-        self.stderr.write(self.style.SUCCESS(f'Thesaurus "{title}", desc: {description} issued at {thesaurus_date}'))
+        self.stderr.write(
+            self.style.SUCCESS(
+                f'Thesaurus "{title}", desc: {description} issued at {thesaurus_date}'
+            )
+        )
 
         # skipping thesaurus label due to no thesaurus metadata in agrovoc found
 
         for concept in g.subjects(SKOS.inScheme, AGROVOC_ConceptSchemeURI):
             about = str(concept)
 
-            # loading default lang from settings
-            default_lang = getattr(settings, 'THESAURUS_DEFAULT_LANG', 'en')
-
-            alt_label = get_default_language_preflabel(g, concept, default_lang)
+            alt_label = get_default_language_preflabel(g, concept, defaultlang)
             if alt_label is None:
-                self.stderr.write(self.style.ERROR(f'could not find preflabel for concept ({concept}) in THESAURUS_DEFAULT_LANG({default_lang}), skipping entry ...'))
+                self.stderr.write(
+                    self.style.ERROR(
+                        f"could not find preflabel for concept ({concept}) in THESAURUS_DEFAULT_LANG({defaultlang}), skipping entry ..."
+                    )
+                )
                 continue
 
             tk = ThesaurusKeyword()
@@ -157,7 +189,9 @@ class Command(BaseCommand):
 
             i = 0
             for pref_label_element in g.objects(concept, SKOS_XL.prefLabel):
-                pref_label = Literal(g.value(pref_label_element, SKOS_XL.literalForm, None))
+                pref_label = Literal(
+                    g.value(pref_label_element, SKOS_XL.literalForm, None)
+                )
                 lang = pref_label.language
                 if lang not in SUPPORTED_LANGUAGES:
                     continue
@@ -172,13 +206,17 @@ class Command(BaseCommand):
                     try:
                         tkl.save()
                     except:
-                        self.stderr.write(self.style.ERROR(f'could not add label: {label} with language: {lang}) to database, skipping entry ...'))
+                        self.stderr.write(
+                            self.style.ERROR(
+                                f"could not add label: {label} with language: {lang}) to database, skipping entry ..."
+                            )
+                        )
 
-            self.stderr.write(self.style.SUCCESS(f' set alt_label: {alt_label}: ({i})'))
+            self.stderr.write(self.style.SUCCESS(f" set alt_label: {alt_label}: ({i})"))
 
 
 def get_default_language_preflabel(g: Graph, concept: URIRef, default_lang: str) -> str:
-    '''searching for preflabel with default lang '''
+    """searching for preflabel with default lang"""
 
     for label in g.objects(concept, SKOS_XL.prefLabel):
         pref_label = Literal(g.value(label, SKOS_XL.literalForm, None))
