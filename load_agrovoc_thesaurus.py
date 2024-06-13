@@ -18,14 +18,23 @@
 #
 #########################################################################
 
+from typing import List
+
 from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 from django.core.management.base import BaseCommand, CommandError
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import SKOS, DCTERMS
+from rdflib.namespace import RDF, RDFS, SKOS, DC, DCTERMS
+
 from rdflib.util import guess_format
 
 from geonode.base.models import Thesaurus, ThesaurusKeyword, ThesaurusKeywordLabel
+
+
+def __apply_lower_case__(value: str, lower_case: bool):
+    if lower_case:
+        return value.lower()
+    return value
 
 
 class SKOS_XL:
@@ -84,6 +93,13 @@ class Command(BaseCommand):
         )
 
         parser.add_argument(
+            "--force-lower-case",
+            dest="lower_case",
+            action="store_true",
+            help="all tkeywords and and tkeywordlabels are stored in lower case ...",
+        )
+
+        parser.add_argument(
             "--defaultlang",
             dest="default_lang",
             type=str,
@@ -98,6 +114,7 @@ class Command(BaseCommand):
         description = options.get("description")
         dryrun = options.get("dryrun")
         defaultlang = options.get("default_lang")
+        lower_case = options.get("lower_case")
 
         if not input_file:
             raise CommandError("Missing thesaurus rdf file path (--file)")
@@ -112,6 +129,7 @@ class Command(BaseCommand):
             title=title,
             description=description,
             defaultlang=defaultlang,
+            lower_case=lower_case,
         )
 
     def load_thesaurus(
@@ -122,6 +140,7 @@ class Command(BaseCommand):
         title: str,
         description: str,
         defaultlang: str,
+        lower_case: bool,
     ):
         g = Graph()
 
@@ -149,12 +168,21 @@ class Command(BaseCommand):
         ).toPython()
         thesaurus_date = thesaurus_date.replace(tzinfo=None).isoformat()
 
+        scheme = g.value(None, RDF.type, SKOS.ConceptScheme, any=False)
+
+        if scheme is None:
+            raise CommandError("ConceptScheme not found in file")
+
+        available_titles = [t for t in g.objects(scheme) if isinstance(t, Literal)]
+        thesaurus_title = value_for_language(available_titles, defaultlang)
+        description = g.value(scheme, DC.description, None, default=thesaurus_title)
+
         # define Thesaurus metadata for AGROVOC
         thesaurus = Thesaurus()
         thesaurus.identifier = name
-        thesaurus.description = title
-        thesaurus.title = description
-        thesaurus.about = AGROVOC_ConceptSchemeURI
+        thesaurus.description = description
+        thesaurus.title = thesaurus_title
+        thesaurus.about = str(scheme)
         thesaurus.date = thesaurus_date
 
         if store:
@@ -167,11 +195,12 @@ class Command(BaseCommand):
         )
 
         # skipping thesaurus label due to no thesaurus metadata in agrovoc found
-
         for concept in g.subjects(SKOS.inScheme, AGROVOC_ConceptSchemeURI):
-            about = str(concept)
-
+            about = __apply_lower_case__(str(concept), lower_case)
             alt_label = get_default_language_preflabel(g, concept, defaultlang)
+            if alt_label is None:
+              continue
+            alt_label = __apply_lower_case__(str(alt_label), lower_case)
             if alt_label is None:
                 self.stderr.write(
                     self.style.ERROR(
@@ -189,14 +218,12 @@ class Command(BaseCommand):
 
             i = 0
             for pref_label_element in g.objects(concept, SKOS_XL.prefLabel):
-                pref_label = Literal(
-                    g.value(pref_label_element, SKOS_XL.literalForm, None)
-                )
-                lang = pref_label.language
+                pref_label = Literal(g.value(pref_label_element, SKOS_XL.literalForm, None))
+                lang = __apply_lower_case__(pref_label.language, lower_case)
                 if lang not in SUPPORTED_LANGUAGES:
                     continue
 
-                label = str(pref_label)
+                label = __apply_lower_case__(str(pref_label), lower_case)
                 tkl = ThesaurusKeywordLabel()
                 tkl.keyword = tk
                 tkl.lang = lang
@@ -213,6 +240,19 @@ class Command(BaseCommand):
                         )
 
             self.stderr.write(self.style.SUCCESS(f" set alt_label: {alt_label}: ({i})"))
+
+
+def value_for_language(available: List[Literal], default_lang: str) -> str:
+    sorted_lang = sorted(
+        available,
+        key=lambda literal: "" if literal.language is None else literal.language,
+    )
+    for item in sorted_lang:
+        if item.language is None:
+            return str(item)
+        elif item.language.split("-")[0] == default_lang:
+            return str(item)
+    return str(available[0])
 
 
 def get_default_language_preflabel(g: Graph, concept: URIRef, default_lang: str) -> str:
