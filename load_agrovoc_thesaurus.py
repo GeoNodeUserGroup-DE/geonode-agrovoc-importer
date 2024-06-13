@@ -199,7 +199,7 @@ class Command(BaseCommand):
             about = __apply_lower_case__(str(concept), lower_case)
             alt_label = get_default_language_preflabel(g, concept, defaultlang)
             if alt_label is None:
-              continue
+                continue
             alt_label = __apply_lower_case__(str(alt_label), lower_case)
             if alt_label is None:
                 self.stderr.write(
@@ -218,7 +218,9 @@ class Command(BaseCommand):
 
             i = 0
             for pref_label_element in g.objects(concept, SKOS_XL.prefLabel):
-                pref_label = Literal(g.value(pref_label_element, SKOS_XL.literalForm, None))
+                pref_label = Literal(
+                    g.value(pref_label_element, SKOS_XL.literalForm, None)
+                )
                 lang = __apply_lower_case__(pref_label.language, lower_case)
                 if lang not in SUPPORTED_LANGUAGES:
                     continue
